@@ -6,6 +6,7 @@ import com.google.common.collect.Multiset;
 import com.google.common.io.CharStreams;
 import com.google.common.io.InputSupplier;
 import com.google.common.io.LineProcessor;
+import org.apache.mahout.common.RandomUtils;
 import org.apache.mahout.math.Matrix;
 import org.apache.mahout.math.SparseRowMatrix;
 import org.apache.mahout.vectorizer.encoders.Dictionary;
@@ -13,6 +14,7 @@ import org.apache.mahout.vectorizer.encoders.Dictionary;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.Random;
 
 /**
  * Analyzes data in a sparse matrix for interesting cooccurrence.
@@ -52,17 +54,31 @@ public class Analyze {
             }
         });
 
-        Matrix cooccurrence = new SparseRowMatrix(rowDict.size(), colDict.size(), true);
 
-        CharStreams.readLines(input, new LineProcessor<Object>() {
+        Matrix cooccurrence = CharStreams.readLines(input, new LineProcessor<Matrix>() {
+            Matrix m = new SparseRowMatrix(rowDict.size(), colDict.size(), true);
 
             public boolean processLine(String s) throws IOException {
+                Iterator<String> x = onTab.split(s).iterator();
+                int row = rowDict.intern(x.next());
+                int col = colDict.intern(x.next());
 
+                double rowRate = Math.min(1000.0, rowCounts.count(row)) / rowCounts.count(row);
+                double colRate = Math.min(1000.0, colCounts.count(col)) / colCounts.count(col);
+                Random random = RandomUtils.getRandom();
+                if (random.nextDouble() < rowRate && random.nextDouble() < colRate) {
+                    m.set(row, col, 1);
+                }
+                return true;
             }
 
-            public Object getResult() {
-                throw new UnsupportedOperationException("Default operation");
+            public Matrix getResult() {
+                return m;
             }
-        })
+        });
+
+        // TODO LLR filtering goes here.
+
+        return cooccurrence;
     }
 }
