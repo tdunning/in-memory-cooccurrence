@@ -73,6 +73,7 @@ public class Analyze {
         final Multiset<Integer> rowCounts = HashMultiset.create();
         final Multiset<Integer> colCounts = HashMultiset.create();
 
+        // read the data and build dictionaries.  This tells us how large the occurrence matrix must be
         CharStreams.readLines(input, new LineProcessor<Object>() {
 
             public boolean processLine(String s) throws IOException {
@@ -88,6 +89,7 @@ public class Analyze {
         });
 
 
+        // now we can read the actual data.  Note that we downsample this data based on our first pass
         Matrix occurrences = CharStreams.readLines(input, new LineProcessor<Matrix>() {
             Matrix m = new SparseRowMatrix(rowDict.size(), colDict.size(), true);
 
@@ -100,7 +102,7 @@ public class Analyze {
                 double colRate = Math.min(1000.0, colCounts.count(col)) / colCounts.count(col);
                 Random random = RandomUtils.getRandom();
                 if (random.nextDouble() < rowRate && random.nextDouble() < colRate) {
-                    m.set(row, col, m.get(row, col) + 1);
+                    m.set(row, col, 1);
                 }
                 return true;
             }
@@ -110,19 +112,22 @@ public class Analyze {
             }
         });
 
+        // now we square the occurrence matrix to get cooccurrences
         Matrix cooccurrence = square(occurrences);
 
+        // to determine anomalous cooccurrence, we need row and column sums
         Vector rowSums = new DenseVector(rowDict.size());
         Vector colSums = new DenseVector(colDict.size());
         for (MatrixSlice row : cooccurrence) {
             rowSums.set(row.index(), row.vector().zSum());
         }
 
-        double total = rowSums.zSum();
-
         for (int i = 0; i < colDict.size(); i++) {
             colSums.set(i, cooccurrence.viewColumn(i).zSum());
         }
+
+        // and the total
+        double total = rowSums.zSum();
 
         for (MatrixSlice row : cooccurrence) {
             Iterator<Vector.Element> elements = row.vector().iterateNonZero();
