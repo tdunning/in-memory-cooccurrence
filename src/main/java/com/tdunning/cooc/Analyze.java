@@ -61,7 +61,8 @@ public class Analyze {
 
     /**
      * Analyze an input to find significant cooccurrences.  The input should consist of tab-delimited
-     * row and column designators.  The output will be a matrix of significant cooccurrences.
+     * row and column designators.  The row is the unit of text for textual cooccurrence or the user
+     * for recommendations.  The output will be a matrix of significant cooccurrences.
      * @throws IOException
      * @param input  A tab-delimited input file with row and column descriptors
      */
@@ -87,7 +88,7 @@ public class Analyze {
         });
 
 
-        Matrix cooccurrence = CharStreams.readLines(input, new LineProcessor<Matrix>() {
+        Matrix occurrences = CharStreams.readLines(input, new LineProcessor<Matrix>() {
             Matrix m = new SparseRowMatrix(rowDict.size(), colDict.size(), true);
 
             public boolean processLine(String s) throws IOException {
@@ -108,6 +109,8 @@ public class Analyze {
                 return m;
             }
         });
+
+        Matrix cooccurrence = square(occurrences);
 
         Vector rowSums = new DenseVector(rowDict.size());
         Vector colSums = new DenseVector(colDict.size());
@@ -148,6 +151,29 @@ public class Analyze {
             }
         }
 
+    }
+
+    /**
+     * Given a matrix A, return A' * A which can be interpreted as a cooccurrence matrix.
+     * @param occurrences The original occurrence data
+     * @return The cooccurrence data.
+     */
+    private Matrix square(Matrix occurrences) {
+        Matrix r = new SparseRowMatrix(occurrences.columnSize(), occurrences.columnSize());
+        for (MatrixSlice row : occurrences) {
+            Iterator<Vector.Element> i = row.vector().iterateNonZero();
+            Iterator<Vector.Element> j = row.vector().iterateNonZero();
+            while (i.hasNext()) {
+                Vector.Element e1 = i.next();
+                while (j.hasNext()) {
+                    Vector.Element e2 = j.next();
+                    r.set(e1.index(), e2.index(), r.get(e1.index(), e2.index()) + e1.get() * e2.get());
+                    j.next();
+                }
+                i.next();
+            }
+        }
+        return r;
     }
 
     public Matrix getFilteredCooccurrence() {
