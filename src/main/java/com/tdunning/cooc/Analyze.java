@@ -2,19 +2,21 @@ package com.tdunning.cooc;
 
 import com.google.common.base.Splitter;
 import com.google.common.collect.HashMultiset;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Multiset;
+import com.google.common.collect.Ordering;
 import com.google.common.io.CharStreams;
 import com.google.common.io.InputSupplier;
 import com.google.common.io.LineProcessor;
 import org.apache.mahout.common.RandomUtils;
 import org.apache.mahout.math.*;
+import org.apache.mahout.math.Vector;
 import org.apache.mahout.math.stats.LogLikelihood;
 import org.apache.mahout.vectorizer.encoders.Dictionary;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.util.Iterator;
-import java.util.Random;
+import java.util.*;
 
 /**
  * Analyzes data in a sparse matrix for interesting cooccurrence.
@@ -31,6 +33,7 @@ import java.util.Random;
  * cooccurrence matrix while down-sampling the data.
  */
 public class Analyze {
+    private static final int ROW_LIMIT_SIZE = 200;
     public final Splitter onTab = Splitter.on("\t");
 
     public Matrix analyze(InputSupplier<BufferedReader> input) throws IOException {
@@ -102,6 +105,20 @@ public class Analyze {
             }
         }
 
-        return cooccurrence;
+        Matrix filteredMatrix =new SparseRowMatrix(rowDict.size(), colDict.size(), true);
+        for (MatrixSlice row : cooccurrence) {
+            List<Vector.Element> elements = Lists.newArrayList(row.vector().iterateNonZero());
+            Collections.sort(elements, new Ordering<Vector.Element>() {
+                public int compare(Vector.Element o1, Vector.Element o2) {
+                    return Double.compare(o1.get(), o2.get());
+                }
+            }.reverse());
+            elements = elements.subList(0, Math.min(ROW_LIMIT_SIZE, elements.size()));
+            for (Vector.Element element : elements) {
+                filteredMatrix.set(row.index(), element.index(), 1);
+            }
+        }
+
+        return filteredMatrix;
     }
 }
