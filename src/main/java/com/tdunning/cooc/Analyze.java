@@ -1,11 +1,13 @@
 package com.tdunning.cooc;
 
+import com.google.common.base.Charsets;
 import com.google.common.base.Splitter;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.Ordering;
 import com.google.common.io.CharStreams;
+import com.google.common.io.Files;
 import com.google.common.io.InputSupplier;
 import com.google.common.io.LineProcessor;
 import org.apache.mahout.common.RandomUtils;
@@ -14,14 +16,19 @@ import org.apache.mahout.math.Vector;
 import org.apache.mahout.math.stats.LogLikelihood;
 import org.apache.mahout.vectorizer.encoders.Dictionary;
 
-import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.util.*;
 
 /**
  * Analyzes data in a sparse matrix for interesting cooccurrence.
  *
- * This involves:
+ * The input is assumed to contain two tab separated fields which are string names
+ * of the row and column of the cooccurrence matrix, respectively.  The output
+ * of this method is a reduced cooccurrence matrix suitable for indexing.
+ *
+ * The process of reduction involves:
  *
  * <ul>
  *     <li>downsampling the data to limit row and column cardinality</li>
@@ -34,14 +41,36 @@ import java.util.*;
  */
 public class Analyze {
     private static final int ROW_LIMIT_SIZE = 200;
-    public final Splitter onTab = Splitter.on("\t");
+    public static final Splitter onTab = Splitter.on("\t");
+    private final Dictionary rowDict;
+    private final Dictionary colDict;
+    private final Matrix filteredMatrix;
 
-    public Matrix analyze(InputSupplier<BufferedReader> input) throws IOException {
+    /**
+     * This is for illustration purposes only at this time.
+     *
+     * @param args  A file to process
+     * @throws IOException
+     */
+    public static void main(String[] args) throws IOException {
+        Analyze analyzer = new Analyze(Files.newReaderSupplier(new File(args[0]), Charsets.UTF_8));
+        Matrix m = analyzer.getFilteredCooccurrence();
+        Dictionary rowDict = analyzer.getRowDict();
+        Dictionary colDict = analyzer.getColDict();
+    }
+
+    /**
+     * Analyze an input to find significant cooccurrences.  The input should consist of tab-delimited
+     * row and column designators.  The output will be a matrix of significant cooccurrences.
+     * @throws IOException
+     * @param input  A tab-delimited input file with row and column descriptors
+     */
+    public Analyze(InputSupplier<InputStreamReader> input) throws IOException {
+        rowDict = new Dictionary();
+        colDict = new Dictionary();
+
         final Multiset<Integer> rowCounts = HashMultiset.create();
         final Multiset<Integer> colCounts = HashMultiset.create();
-
-        final Dictionary rowDict = new Dictionary();
-        final Dictionary colDict = new Dictionary();
 
         CharStreams.readLines(input, new LineProcessor<Object>() {
 
@@ -105,7 +134,7 @@ public class Analyze {
             }
         }
 
-        Matrix filteredMatrix =new SparseRowMatrix(rowDict.size(), colDict.size(), true);
+        filteredMatrix = new SparseRowMatrix(rowDict.size(), colDict.size(), true);
         for (MatrixSlice row : cooccurrence) {
             List<Vector.Element> elements = Lists.newArrayList(row.vector().iterateNonZero());
             Collections.sort(elements, new Ordering<Vector.Element>() {
@@ -119,6 +148,17 @@ public class Analyze {
             }
         }
 
+    }
+
+    public Matrix getFilteredCooccurrence() {
         return filteredMatrix;
+    }
+
+    public Dictionary getRowDict() {
+        return rowDict;
+    }
+
+    public Dictionary getColDict() {
+        return colDict;
     }
 }
