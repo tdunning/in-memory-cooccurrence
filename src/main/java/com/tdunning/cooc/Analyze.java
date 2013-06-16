@@ -180,7 +180,9 @@ public class Analyze {
                 Vector.Element e1 = i.next();
                 while (j.hasNext()) {
                     Vector.Element e2 = j.next();
-                    r.set(e1.index(), e2.index(), r.get(e1.index(), e2.index()) + e1.get() * e2.get());
+                    if (e1.index() != e2.index()) {
+                        r.set(e1.index(), e2.index(), r.get(e1.index(), e2.index()) + e1.get() * e2.get());
+                    }
                 }
             }
         }
