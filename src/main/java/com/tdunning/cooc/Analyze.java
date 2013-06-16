@@ -12,29 +12,31 @@ import com.google.common.io.InputSupplier;
 import com.google.common.io.LineProcessor;
 import org.apache.mahout.common.RandomUtils;
 import org.apache.mahout.math.*;
-import org.apache.mahout.math.Vector;
 import org.apache.mahout.math.stats.LogLikelihood;
 import org.apache.mahout.vectorizer.encoders.Dictionary;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.util.*;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Random;
 
 /**
  * Analyzes data in a sparse matrix for interesting cooccurrence.
- *
+ * <p/>
  * The input is assumed to contain two tab separated fields which are string names
  * of the row and column of the cooccurrence matrix, respectively.  The output
  * of this method is a reduced cooccurrence matrix suitable for indexing.
- *
+ * <p/>
  * The process of reduction involves:
- *
+ * <p/>
  * <ul>
- *     <li>downsampling the data to limit row and column cardinality</li>
- *     <li>using LLR to find anomalous cooccurrence</li>
+ * <li>downsampling the data to limit row and column cardinality</li>
+ * <li>using LLR to find anomalous cooccurrence</li>
  * </ul>
- *
+ * <p/>
  * This is done by making several passes over an input file.  The first pass is used
  * to create dictionaries of the symbols involved.  The second pass populates the
  * cooccurrence matrix while down-sampling the data.
@@ -42,18 +44,19 @@ import java.util.*;
 public class Analyze {
     private static final int ROW_LIMIT_SIZE = 200;
     public static final Splitter onTab = Splitter.on("\t");
-    private final Dictionary rowDict;
-    private final Dictionary colDict;
-    private final Matrix filteredMatrix;
+    private Dictionary rowDict;
+    private Dictionary colDict;
+    private Matrix filteredMatrix;
 
     /**
      * This is for illustration purposes only at this time.
      *
-     * @param args  A file to process
+     * @param args A file to process
      * @throws IOException
      */
     public static void main(String[] args) throws IOException {
         Analyze analyzer = new Analyze(Files.newReaderSupplier(new File(args[0]), Charsets.UTF_8));
+
         Matrix m = analyzer.getFilteredCooccurrence();
         Dictionary colDict = analyzer.getColDict();
         for (MatrixSlice row : m) {
@@ -66,62 +69,26 @@ public class Analyze {
     }
 
     /**
+     * Package local constructor for testing only.
+     */
+    Analyze() {
+        rowDict = new Dictionary();
+        colDict = new Dictionary();
+    }
+
+    /**
      * Analyze an input to find significant cooccurrences.  The input should consist of tab-delimited
      * row and column designators.  The row is the unit of text for textual cooccurrence or the user
      * for recommendations.  The output will be a matrix of significant cooccurrences.
+     *
+     * @param input A tab-delimited input file with row and column descriptors
      * @throws IOException
-     * @param input  A tab-delimited input file with row and column descriptors
      */
     public Analyze(InputSupplier<InputStreamReader> input) throws IOException {
-        rowDict = new Dictionary();
-        colDict = new Dictionary();
-
-        final Multiset<Integer> rowCounts = HashMultiset.create();
-        final Multiset<Integer> colCounts = HashMultiset.create();
-
-        // read the data and build dictionaries.  This tells us how large the occurrence matrix must be
-        CharStreams.readLines(input, new LineProcessor<Object>() {
-
-            public boolean processLine(String s) throws IOException {
-                Iterator<String> x = onTab.split(s).iterator();
-                rowCounts.add(rowDict.intern(x.next()));
-                colCounts.add(colDict.intern(x.next()));
-                return true;
-            }
-
-            public Object getResult() {
-                return null;
-            }
-        });
-
-
-        // now we can read the actual data.  Note that we downsample this data based on our first pass
-        Matrix occurrences = CharStreams.readLines(input, new LineProcessor<Matrix>() {
-            Matrix m = new SparseRowMatrix(rowDict.size(), colDict.size(), true);
-
-            public boolean processLine(String s) throws IOException {
-                Iterator<String> x = onTab.split(s).iterator();
-                int row = rowDict.intern(x.next());
-                int col = colDict.intern(x.next());
-
-                double rowRate = Math.min(1000.0, rowCounts.count(row)) / rowCounts.count(row);
-                double colRate = Math.min(1000.0, colCounts.count(col)) / colCounts.count(col);
-                Random random = RandomUtils.getRandom();
-                // this down-samples by the product of both factors.  Almost always, one factor will be == 1.
-                // if that assumption turns out wrong, we might down-sample according to Math.min(rowRate, colRate)
-                if (random.nextDouble() < rowRate && random.nextDouble() < colRate) {
-                    m.set(row, col, 1);
-                }
-                return true;
-            }
-
-            public Matrix getResult() {
-                return m;
-            }
-        });
+        this();
 
         // now we square the occurrence matrix to get cooccurrences
-        Matrix cooccurrence = square(occurrences);
+        Matrix cooccurrence = square(readOccurrenceMatrix(input));
 
         // to determine anomalous cooccurrence, we need row and column sums
         Vector rowSums = new DenseVector(rowDict.size());
@@ -166,12 +133,63 @@ public class Analyze {
 
     }
 
+    public Matrix readOccurrenceMatrix(InputSupplier<InputStreamReader> input) throws IOException {
+        final Multiset<Integer> rowCounts = HashMultiset.create();
+        final Multiset<Integer> colCounts = HashMultiset.create();
+
+        // read the data and build dictionaries.  This tells us how large the occurrence matrix must be
+        CharStreams.readLines(input, new LineProcessor<Object>() {
+
+            public boolean processLine(String s) throws IOException {
+                Iterator<String> x = onTab.split(s).iterator();
+                String s1 = x.next();
+                String s2 = x.next();
+                rowCounts.add(rowDict.intern(s1));
+                colCounts.add(colDict.intern(s2));
+                return true;
+            }
+
+            public Object getResult() {
+                return null;
+            }
+        });
+
+
+        // now we can read the actual data.  Note that we downsample this data based on our first pass
+        return CharStreams.readLines(input, new LineProcessor<Matrix>() {
+            Matrix m = new SparseRowMatrix(rowDict.size(), colDict.size(), true);
+
+            public boolean processLine(String s) throws IOException {
+                Iterator<String> x = onTab.split(s).iterator();
+                int row = rowDict.intern(x.next());
+                int col = colDict.intern(x.next());
+
+                double rowRate = Math.min(1000.0, rowCounts.count(row)) / rowCounts.count(row);
+                double colRate = Math.min(1000.0, colCounts.count(col)) / colCounts.count(col);
+                Random random = RandomUtils.getRandom();
+                // this down-samples by the product of both factors.  Almost always, one factor will be == 1.
+                // if that assumption turns out wrong, we might down-sample according to Math.min(rowRate, colRate)
+                if (random.nextDouble() < rowRate && random.nextDouble() < colRate) {
+                    m.set(row, col, 1);
+                }
+                return true;
+            }
+
+            public Matrix getResult() {
+                return m;
+            }
+        });
+    }
+
     /**
      * Given a matrix A, return A' * A which can be interpreted as a cooccurrence matrix.
+     *
+     * Exposed for testing only.
+     *
      * @param occurrences The original occurrence data
      * @return The cooccurrence data.
      */
-    private Matrix square(Matrix occurrences) {
+    Matrix square(Matrix occurrences) {
         Matrix r = new SparseRowMatrix(occurrences.columnSize(), occurrences.columnSize());
         for (MatrixSlice row : occurrences) {
             Iterator<Vector.Element> i = row.vector().iterateNonZero();
@@ -182,6 +200,7 @@ public class Analyze {
                     Vector.Element e2 = j.next();
                     if (e1.index() != e2.index()) {
                         r.set(e1.index(), e2.index(), r.get(e1.index(), e2.index()) + e1.get() * e2.get());
+                        r.set(e2.index(), e1.index(), r.get(e1.index(), e2.index()));
                     }
                 }
             }

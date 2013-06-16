@@ -53,6 +53,11 @@
             <artifactId>mahout-core</artifactId>
             <version>0.7</version>
         </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.8.2</version>
+        </dependency>
     </dependencies>
 
 
