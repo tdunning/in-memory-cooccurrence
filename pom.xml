@@ -8,13 +8,40 @@
     <artifactId>in-memory-cooccurrence</artifactId>
     <version>0.1-SNAPSHOT</version>
 
-  <dependencies>
-      <dependency>
-          <groupId>org.apache.mahout</groupId>
-          <artifactId>mahout-core</artifactId>
-          <version>0.7</version>
-      </dependency>
-  </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <artifactId>maven-assembly-plugin</artifactId>
+                <configuration>
+                    <descriptorRefs>
+                        <descriptorRef>jar-with-dependencies</descriptorRef>
+                    </descriptorRefs>
+                    <archive>
+                        <manifest>
+                            <mainClass>com.tdunning.cooc.Analyze</mainClass>
+                        </manifest>
+                    </archive>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>make-assembly</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>single</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 
-    
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.mahout</groupId>
+            <artifactId>mahout-core</artifactId>
+            <version>0.7</version>
+        </dependency>
+    </dependencies>
+
+
 </project>

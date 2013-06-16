@@ -55,8 +55,14 @@ public class Analyze {
     public static void main(String[] args) throws IOException {
         Analyze analyzer = new Analyze(Files.newReaderSupplier(new File(args[0]), Charsets.UTF_8));
         Matrix m = analyzer.getFilteredCooccurrence();
-        Dictionary rowDict = analyzer.getRowDict();
         Dictionary colDict = analyzer.getColDict();
+        for (MatrixSlice row : m) {
+            Iterator<Vector.Element> i = row.vector().iterateNonZero();
+            while (i.hasNext()) {
+                Vector.Element element = i.next();
+                System.out.printf("%s\t%s\n", colDict.values().get(row.index()), colDict.values().get(element.index()));
+            }
+        }
     }
 
     /**
@@ -101,6 +107,8 @@ public class Analyze {
                 double rowRate = Math.min(1000.0, rowCounts.count(row)) / rowCounts.count(row);
                 double colRate = Math.min(1000.0, colCounts.count(col)) / colCounts.count(col);
                 Random random = RandomUtils.getRandom();
+                // this down-samples by the product of both factors.  Almost always, one factor will be == 1.
+                // if that assumption turns out wrong, we might down-sample according to Math.min(rowRate, colRate)
                 if (random.nextDouble() < rowRate && random.nextDouble() < colRate) {
                     m.set(row, col, 1);
                 }
