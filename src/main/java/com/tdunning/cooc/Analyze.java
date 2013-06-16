@@ -7,8 +7,8 @@ import com.google.common.io.CharStreams;
 import com.google.common.io.InputSupplier;
 import com.google.common.io.LineProcessor;
 import org.apache.mahout.common.RandomUtils;
-import org.apache.mahout.math.Matrix;
-import org.apache.mahout.math.SparseRowMatrix;
+import org.apache.mahout.math.*;
+import org.apache.mahout.math.stats.LogLikelihood;
 import org.apache.mahout.vectorizer.encoders.Dictionary;
 
 import java.io.BufferedReader;
@@ -67,7 +67,7 @@ public class Analyze {
                 double colRate = Math.min(1000.0, colCounts.count(col)) / colCounts.count(col);
                 Random random = RandomUtils.getRandom();
                 if (random.nextDouble() < rowRate && random.nextDouble() < colRate) {
-                    m.set(row, col, 1);
+                    m.set(row, col, m.get(row, col) + 1);
                 }
                 return true;
             }
@@ -77,7 +77,30 @@ public class Analyze {
             }
         });
 
-        // TODO LLR filtering goes here.
+        Vector rowSums = new DenseVector(rowDict.size());
+        Vector colSums = new DenseVector(colDict.size());
+        for (MatrixSlice row : cooccurrence) {
+            rowSums.set(row.index(), row.vector().zSum());
+        }
+
+        double total = rowSums.zSum();
+
+        for (int i = 0; i < colDict.size(); i++) {
+            colSums.set(i, cooccurrence.viewColumn(i).zSum());
+        }
+
+        for (MatrixSlice row : cooccurrence) {
+            Iterator<Vector.Element> elements = row.vector().iterateNonZero();
+            while (elements.hasNext()) {
+                Vector.Element element = elements.next();
+                long k11 = (long) element.get();
+                long k12 = (long) (rowSums.get(row.index()) - k11);
+                long k21 = (long) (colSums.get(element.index()) - k11);
+                long k22 = (long) (total - k11 - k12 - k21);
+                double score = LogLikelihood.rootLogLikelihoodRatio(k11, k12, k21, k22);
+                element.set(score);
+            }
+        }
 
         return cooccurrence;
     }
