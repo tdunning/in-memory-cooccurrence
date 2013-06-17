@@ -1,6 +1,7 @@
 package com.tdunning.cooc;
 
 import com.google.common.base.Charsets;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Lists;
@@ -55,6 +56,7 @@ public class Analyze {
      * @throws IOException
      */
     public static void main(String[] args) throws IOException {
+        Preconditions.checkArgument(args.length == 1, "Should have a file name as an argument");
         Analyze analyzer = new Analyze(Files.newReaderSupplier(new File(args[0]), Charsets.UTF_8));
 
         Matrix m = analyzer.getFilteredCooccurrence();
@@ -88,7 +90,7 @@ public class Analyze {
         this();
 
         // now we square the occurrence matrix to get cooccurrences
-        Matrix cooccurrence = square(readOccurrenceMatrix(input));
+        Matrix cooccurrence = square(readOccurrenceMatrix(input, 1000.0, 1000.0));
 
         // to determine anomalous cooccurrence, we need row and column sums
         Vector rowSums = new DenseVector(rowDict.size());
@@ -133,7 +135,7 @@ public class Analyze {
 
     }
 
-    public Matrix readOccurrenceMatrix(InputSupplier<InputStreamReader> input) throws IOException {
+    public Matrix readOccurrenceMatrix(InputSupplier<InputStreamReader> input, final double maxRowCount, final double maxColumnCount) throws IOException {
         final Multiset<Integer> rowCounts = HashMultiset.create();
         final Multiset<Integer> colCounts = HashMultiset.create();
 
@@ -157,6 +159,7 @@ public class Analyze {
 
         // now we can read the actual data.  Note that we downsample this data based on our first pass
         return CharStreams.readLines(input, new LineProcessor<Matrix>() {
+            Random random = RandomUtils.getRandom();
             Matrix m = new SparseRowMatrix(rowDict.size(), colDict.size(), true);
 
             public boolean processLine(String s) throws IOException {
@@ -164,12 +167,12 @@ public class Analyze {
                 int row = rowDict.intern(x.next());
                 int col = colDict.intern(x.next());
 
-                double rowRate = Math.min(1000.0, rowCounts.count(row)) / rowCounts.count(row);
-                double colRate = Math.min(1000.0, colCounts.count(col)) / colCounts.count(col);
-                Random random = RandomUtils.getRandom();
-                // this down-samples by the product of both factors.  Almost always, one factor will be == 1.
-                // if that assumption turns out wrong, we might down-sample according to Math.min(rowRate, colRate)
-                if (random.nextDouble() < rowRate && random.nextDouble() < colRate) {
+                double rowSampleRate = Math.min(maxRowCount, rowCounts.count(row)) / rowCounts.count(row);
+                double columnSampleRate = Math.min(maxColumnCount, colCounts.count(col)) / colCounts.count(col);
+                // this down-samples at a rate of Math.min(rowRate, colRate).  The alternative would be
+                // to generate two random numbers so we could downsample at the rate of rowRate * colRate.
+                // Since one of those should almost always be == 1, this shouldn't much matter.
+                if (random.nextDouble() < Math.min(rowSampleRate, columnSampleRate)) {
                     m.set(row, col, 1);
                 }
                 return true;
