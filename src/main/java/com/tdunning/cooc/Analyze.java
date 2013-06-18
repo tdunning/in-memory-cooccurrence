@@ -1,29 +1,26 @@
 package com.tdunning.cooc;
 
 import com.google.common.base.Charsets;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
 import com.google.common.collect.*;
 import com.google.common.io.CharStreams;
 import com.google.common.io.Files;
 import com.google.common.io.InputSupplier;
 import com.google.common.io.LineProcessor;
-
-
 import org.apache.mahout.common.RandomUtils;
 import org.apache.mahout.math.*;
+import org.apache.mahout.math.Vector;
 import org.apache.mahout.math.function.Functions;
 import org.apache.mahout.math.stats.LogLikelihood;
 import org.apache.mahout.vectorizer.encoders.Dictionary;
+import org.kohsuke.args4j.CmdLineException;
+import org.kohsuke.args4j.CmdLineParser;
+import org.kohsuke.args4j.Option;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Random;
+import java.util.*;
 
 /**
  * Analyzes data in a sparse matrix for interesting cooccurrence.
@@ -44,7 +41,6 @@ import java.util.Random;
  * cooccurrence matrix while down-sampling the data.
  */
 public class Analyze {
-    private static int ROW_LIMIT_SIZE = 200;
     public static final Splitter onTab = Splitter.on("\t");
     private Logger log = LoggerFactory.getLogger(Analyze.class);
 
@@ -52,7 +48,7 @@ public class Analyze {
     private Dictionary colDict;
     private Matrix filteredMatrix;
     private Multimap<Integer, Integer> referenceSentences;
-    
+
     /**
      * This is for illustration purposes only at this time.
      *
@@ -60,34 +56,33 @@ public class Analyze {
      * @throws IOException
      */
     public static void main(String[] args) throws IOException {
-        Preconditions.checkArgument(args.length >= 1, "Should have a file name as an argument");
-        Analyze analyzer = new Analyze(Files.newReaderSupplier(new File(args[0]), Charsets.UTF_8), 1000.0, 1000.0, ROW_LIMIT_SIZE);
+        Options options = parseOptions(args);
 
-        if(args.length==2){
-        	ROW_LIMIT_SIZE = Integer.parseInt(args[1]);
-        }
-        
+        Analyze analyzer = new Analyze(Files.newReaderSupplier(new File(args[0]), Charsets.UTF_8),
+                options.maxRowCount, options.maxColumnCount, options.maxRelated);
+
+
         Matrix m = analyzer.getFilteredCooccurrence();
         Dictionary colDict = analyzer.getColDict();
         Dictionary rowDict = analyzer.getRowDict();
         Multimap<Integer, Integer> rSentences = analyzer.getReferenceSentences();
-        
+
         int d = m.columnSize();
         for (MatrixSlice row : m) {
-        	 for (Vector.Element element : row.vector().nonZeroes()) {
-        		int z = row.index()*d + element.index();
+            for (Vector.Element element : row.vector().nonZeroes()) {
+                int z = row.index() * d + element.index();
                 Collection<Integer> concept = rSentences.get(z);
                 Iterator<Integer> it = concept.iterator();
                 System.out.printf("%s\t%s\t%s", colDict.values().get(row.index()), colDict.values().get(element.index()), concept.size());
-                while(it.hasNext()){
-                	System.out.printf("\t%s",rowDict.values().get(it.next()));
+                while (it.hasNext()) {
+                    System.out.printf("\t%s", rowDict.values().get(it.next()));
                 }
                 System.out.printf("\n");
             }
         }
     }
 
-	/**
+    /**
      * Package local constructor for testing only.
      */
     Analyze() {
@@ -101,12 +96,12 @@ public class Analyze {
      * for recommendations.  The output will be a matrix of significant cooccurrences.
      *
      * @param input          A tab-delimited input file with row and column descriptors
-     * @param maxRowCount
-     * @param maxColumnCount
-     * @param rowLimitSize
+     * @param maxRowCount    How many elements in a single row of the occurrence matrix should be retained?
+     * @param maxColumnCount How many columns should be retained?
+     * @param maxRelated     How many related items should be retained?
      * @throws IOException
      */
-    public Analyze(InputSupplier<InputStreamReader> input, double maxRowCount, double maxColumnCount, int rowLimitSize) throws IOException {
+    public Analyze(InputSupplier<InputStreamReader> input, double maxRowCount, double maxColumnCount, int maxRelated) throws IOException {
         this();
 
         Matrix occurrences = readOccurrenceMatrix(input, maxRowCount, maxColumnCount);
@@ -166,7 +161,7 @@ public class Analyze {
                     return Double.compare(o1.get(), o2.get());
                 }
             }.reverse());
-            elements = elements.subList(0, Math.min(rowLimitSize, elements.size()));
+            elements = elements.subList(0, Math.min(maxRelated, elements.size()));
             for (Vector.Element element : elements) {
                 if (element.get() > 0) {
                     filteredMatrix.set(row.index(), element.index(), 1);
@@ -281,7 +276,7 @@ public class Analyze {
 
         log.info("Starting cooccurrence counting");
         referenceSentences = ArrayListMultimap.create();
-        
+
         try (DataInputStream in = new DataInputStream(new FileInputStream(occurrences))) {
             int rowCount = in.readInt();
             int columnCount = in.readInt();
@@ -296,13 +291,13 @@ public class Analyze {
                 }
 
                 for (int n : columns) {
-                    for (int m: columns) {
+                    for (int m : columns) {
                         if (n != m) {
                             double newValue = r.get(n, m) + 1;
                             r.set(n, m, newValue);
-                            
-                         	//Adriano: Store Reference
-                            int z = n*columnCount + m;
+
+                            //Adriano: Store Reference
+                            int z = n * columnCount + m;
                             referenceSentences.put(z, row);
                         }
                     }
@@ -324,7 +319,41 @@ public class Analyze {
         return colDict;
     }
 
-	public Multimap<Integer, Integer> getReferenceSentences() {
-		return referenceSentences;
-	}
+    public Multimap<Integer, Integer> getReferenceSentences() {
+        return referenceSentences;
+    }
+
+    private static Options parseOptions(String[] args) {
+        Options opts = new Options();
+        CmdLineParser parser = new CmdLineParser(opts);
+        try {
+            parser.parseArgument(args);
+        } catch (CmdLineException e) {
+            e.printStackTrace(System.err);
+            parser.printUsage(System.err);
+            System.exit(1);
+        }
+        return opts;
+    }
+
+    private static class Options {
+        @Option(name = "-maxRowCount", usage = "Downsample rows to this size.")
+        int maxRowCount = 500;
+
+        @Option(name = "-maxColumnCount", usage = "Downsample rows to this size.")
+        int maxColumnCount = 500;
+
+        @Option(name = "-maxRelated", usage = "Maximum number of related items to be retained")
+        int maxRelated = 100;
+
+        @Override
+        public String toString() {
+            return "Options{" +
+                    "maxColumnCount=" + maxColumnCount +
+                    ", maxRowCount=" + maxRowCount +
+                    ", maxRelated=" + maxRelated +
+                    '}';
+        }
+    }
+
 }
