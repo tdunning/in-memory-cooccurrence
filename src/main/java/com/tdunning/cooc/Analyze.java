@@ -18,6 +18,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
@@ -41,13 +43,15 @@ import java.util.Random;
  * cooccurrence matrix while down-sampling the data.
  */
 public class Analyze {
-    private static final int ROW_LIMIT_SIZE = 200;
+    private static int ROW_LIMIT_SIZE = 200;
     public static final Splitter onTab = Splitter.on("\t");
     private Logger log = LoggerFactory.getLogger(Analyze.class);
 
     private Dictionary rowDict;
     private Dictionary colDict;
     private Matrix filteredMatrix;
+    private HashMap<Integer,HashSet<Integer>> referenceSentences;
+
 
     /**
      * This is for illustration purposes only at this time.
@@ -56,19 +60,35 @@ public class Analyze {
      * @throws IOException
      */
     public static void main(String[] args) throws IOException {
-        Preconditions.checkArgument(args.length == 1, "Should have a file name as an argument");
+        Preconditions.checkArgument(args.length >= 1, "Should have a file name as an argument");
         Analyze analyzer = new Analyze(Files.newReaderSupplier(new File(args[0]), Charsets.UTF_8), 1000.0, 1000.0, ROW_LIMIT_SIZE);
 
+        if(args.length==2){
+        	ROW_LIMIT_SIZE = Integer.parseInt(args[1]);
+        }
+        
         Matrix m = analyzer.getFilteredCooccurrence();
         Dictionary colDict = analyzer.getColDict();
+        Dictionary rowDict = analyzer.getRowDict();
+        HashMap<Integer,HashSet<Integer>> rSentences = analyzer.getReferenceSentences();
+        
+        int d = m.columnSize();
+        String s = "";
         for (MatrixSlice row : m) {
-            for (Vector.Element element : row.vector().nonZeroes()) {
-                System.out.printf("%s\t%s\n", colDict.values().get(row.index()), colDict.values().get(element.index()));
+        	 for (Vector.Element element : row.vector().nonZeroes()) {
+        		int z = row.index()*d + element.index();
+                HashSet<Integer> concept = rSentences.get(z);
+                Iterator<Integer> it = concept.iterator();
+                s = "";
+                while(it.hasNext()){
+                	s += "\t" + rowDict.values().get(it.next());
+                }
+                System.out.printf("%s\t%s\t%s\t%s\n", colDict.values().get(row.index()), colDict.values().get(element.index()), element.get(),s);
             }
         }
     }
 
-    /**
+	/**
      * Package local constructor for testing only.
      */
     Analyze() {
@@ -150,7 +170,7 @@ public class Analyze {
             elements = elements.subList(0, Math.min(rowLimitSize, elements.size()));
             for (Vector.Element element : elements) {
                 if (element.get() > 0) {
-                    filteredMatrix.set(row.index(), element.index(), 1);
+                    filteredMatrix.set(row.index(), element.index(), element.get());
                 }
             }
         }
@@ -261,7 +281,8 @@ public class Analyze {
         LineCounter counter = new LineCounter(log, "Cooc");
 
         log.info("Starting cooccurrence counting");
-
+        referenceSentences = new HashMap<Integer,HashSet<Integer>>();
+        
         try (DataInputStream in = new DataInputStream(new FileInputStream(occurrences))) {
             int rowCount = in.readInt();
             int columnCount = in.readInt();
@@ -280,6 +301,12 @@ public class Analyze {
                         if (n != m) {
                             double newValue = r.get(n, m) + 1;
                             r.set(n, m, newValue);
+                            
+                         	//Adriano: Store Reference
+                            int z = n*columnCount + m;
+                            HashSet<Integer> s = referenceSentences.get(z);
+                            if(s == null){s = new HashSet<Integer>(); referenceSentences.put(z, s);};
+                            s.add(row);
                         }
                     }
                 }
@@ -299,4 +326,13 @@ public class Analyze {
     public Dictionary getColDict() {
         return colDict;
     }
+
+	public HashMap<Integer,HashSet<Integer>> getReferenceSentences() {
+		return referenceSentences;
+	}
+
+	public void setReferenceSentences(HashMap<Integer,HashSet<Integer>> referenceSentences) {
+		this.referenceSentences = referenceSentences;
+	}
+    
 }
