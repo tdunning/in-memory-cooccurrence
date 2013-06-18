@@ -8,6 +8,8 @@ import com.google.common.io.CharStreams;
 import com.google.common.io.Files;
 import com.google.common.io.InputSupplier;
 import com.google.common.io.LineProcessor;
+
+
 import org.apache.mahout.common.RandomUtils;
 import org.apache.mahout.math.*;
 import org.apache.mahout.math.function.Functions;
@@ -17,9 +19,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
+import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
@@ -50,9 +51,8 @@ public class Analyze {
     private Dictionary rowDict;
     private Dictionary colDict;
     private Matrix filteredMatrix;
-    private HashMap<Integer,HashSet<Integer>> referenceSentences;
-
-
+    private Multimap<Integer, Integer> referenceSentences;
+    
     /**
      * This is for illustration purposes only at this time.
      *
@@ -70,20 +70,19 @@ public class Analyze {
         Matrix m = analyzer.getFilteredCooccurrence();
         Dictionary colDict = analyzer.getColDict();
         Dictionary rowDict = analyzer.getRowDict();
-        HashMap<Integer,HashSet<Integer>> rSentences = analyzer.getReferenceSentences();
+        Multimap<Integer, Integer> rSentences = analyzer.getReferenceSentences();
         
         int d = m.columnSize();
-        String s = "";
         for (MatrixSlice row : m) {
         	 for (Vector.Element element : row.vector().nonZeroes()) {
         		int z = row.index()*d + element.index();
-                HashSet<Integer> concept = rSentences.get(z);
+                Collection<Integer> concept = rSentences.get(z);
                 Iterator<Integer> it = concept.iterator();
-                s = "";
+                System.out.printf("%s\t%s\t%s", colDict.values().get(row.index()), colDict.values().get(element.index()), concept.size());
                 while(it.hasNext()){
-                	s += "\t" + rowDict.values().get(it.next());
+                	System.out.printf("\t%s",rowDict.values().get(it.next()));
                 }
-                System.out.printf("%s\t%s\t%s\t%s\n", colDict.values().get(row.index()), colDict.values().get(element.index()), element.get(),s);
+                System.out.printf("\n");
             }
         }
     }
@@ -170,7 +169,7 @@ public class Analyze {
             elements = elements.subList(0, Math.min(rowLimitSize, elements.size()));
             for (Vector.Element element : elements) {
                 if (element.get() > 0) {
-                    filteredMatrix.set(row.index(), element.index(), element.get());
+                    filteredMatrix.set(row.index(), element.index(), 1);
                 }
             }
         }
@@ -281,7 +280,7 @@ public class Analyze {
         LineCounter counter = new LineCounter(log, "Cooc");
 
         log.info("Starting cooccurrence counting");
-        referenceSentences = new HashMap<Integer,HashSet<Integer>>();
+        referenceSentences = ArrayListMultimap.create();
         
         try (DataInputStream in = new DataInputStream(new FileInputStream(occurrences))) {
             int rowCount = in.readInt();
@@ -304,9 +303,9 @@ public class Analyze {
                             
                          	//Adriano: Store Reference
                             int z = n*columnCount + m;
-                            HashSet<Integer> s = referenceSentences.get(z);
-                            if(s == null){s = new HashSet<Integer>(); referenceSentences.put(z, s);};
-                            s.add(row);
+                            referenceSentences.put(z, row);
+                            
+                            System.out.println(newValue);
                         }
                     }
                 }
@@ -327,12 +326,7 @@ public class Analyze {
         return colDict;
     }
 
-	public HashMap<Integer,HashSet<Integer>> getReferenceSentences() {
+	public Multimap<Integer, Integer> getReferenceSentences() {
 		return referenceSentences;
 	}
-
-	public void setReferenceSentences(HashMap<Integer,HashSet<Integer>> referenceSentences) {
-		this.referenceSentences = referenceSentences;
-	}
-    
 }
