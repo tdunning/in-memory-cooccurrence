@@ -73,5 +73,22 @@
 
     </dependencies>
 
+    <repositories>
+        <repository>
+            <id>github-releases</id>
+            <url>http://oss.sonatype.org/content/repositories/github-releases/</url>
+        </repository>
+        <repository>
+            <id>apache.snapshots</id>
+            <url>https://repository.apache.org/content/groups/snapshots</url>
+            <releases>
+                <enabled>false</enabled>
+            </releases>
+            <snapshots>
+                <enabled>true</enabled>
+                <updatePolicy>daily</updatePolicy>
+            </snapshots>
+        </repository>
+    </repositories>
 
 </project>
