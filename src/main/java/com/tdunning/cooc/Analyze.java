@@ -1,6 +1,7 @@
 package com.tdunning.cooc;
 
 import com.google.common.base.Charsets;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
 import com.google.common.collect.*;
 import com.google.common.io.CharStreams;
@@ -13,6 +14,7 @@ import org.apache.mahout.math.Vector;
 import org.apache.mahout.math.function.Functions;
 import org.apache.mahout.math.stats.LogLikelihood;
 import org.apache.mahout.vectorizer.encoders.Dictionary;
+import org.kohsuke.args4j.Argument;
 import org.kohsuke.args4j.CmdLineException;
 import org.kohsuke.args4j.CmdLineParser;
 import org.kohsuke.args4j.Option;
@@ -57,8 +59,9 @@ public class Analyze {
      */
     public static void main(String[] args) throws IOException {
         Options options = parseOptions(args);
+        Preconditions.checkArgument(options.files.size() == 1, "Should only have one file argument");
 
-        Analyze analyzer = new Analyze(Files.newReaderSupplier(new File(args[0]), Charsets.UTF_8),
+        Analyze analyzer = new Analyze(Files.newReaderSupplier(new File(options.files.get(0)), Charsets.UTF_8),
                 options.maxRowCount, options.maxColumnCount, options.maxRelated);
 
 
@@ -337,6 +340,9 @@ public class Analyze {
     }
 
     private static class Options {
+        @Argument
+        private List<String> files = Lists.newArrayList();
+
         @Option(name = "-maxRowCount", usage = "Downsample rows to this size.")
         int maxRowCount = 500;
 
