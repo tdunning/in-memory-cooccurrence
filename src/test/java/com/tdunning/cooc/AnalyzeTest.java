@@ -82,7 +82,7 @@ public class AnalyzeTest {
         Assert.assertTrue(columnSums(x).aggregate(Functions.MAX, Functions.IDENTITY) < 65);
     }
 
-    @Test
+    //@Test
     public void testScale() throws IOException {
         for (int scale : new int[]{5, 6, 7}) {
             scaleRun(scale);
