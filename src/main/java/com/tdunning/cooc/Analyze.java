@@ -304,8 +304,6 @@ public class Analyze {
                          	//Adriano: Store Reference
                             int z = n*columnCount + m;
                             referenceSentences.put(z, row);
-                            
-                            System.out.println(newValue);
                         }
                     }
                 }
