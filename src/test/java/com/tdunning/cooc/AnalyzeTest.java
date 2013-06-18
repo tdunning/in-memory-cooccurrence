@@ -1,6 +1,9 @@
 package com.tdunning.cooc;
 
 import com.google.common.base.Charsets;
+import com.google.common.hash.BloomFilter;
+import com.google.common.hash.Funnel;
+import com.google.common.hash.PrimitiveSink;
 import com.google.common.io.Resources;
 import junit.framework.Assert;
 import org.apache.mahout.common.RandomUtils;
@@ -8,13 +11,15 @@ import org.apache.mahout.math.*;
 import org.apache.mahout.math.function.DoubleFunction;
 import org.apache.mahout.math.function.Functions;
 import org.apache.mahout.math.function.VectorFunction;
+import org.apache.mahout.math.random.ChineseRestaurant;
 import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.file.Files;
-import java.util.Iterator;
 import java.util.Random;
 
 import static junit.framework.Assert.assertEquals;
@@ -60,9 +65,7 @@ public class AnalyzeTest {
         File f = Files.createTempFile("data", ".csv").toFile();
         try (PrintWriter out = new PrintWriter(f)) {
             for (MatrixSlice row : m) {
-                Iterator<Vector.Element> i = row.vector().iterateNonZero();
-                while (i.hasNext()) {
-                    Vector.Element element = i.next();
+                for (Vector.Element element : row.nonZeroes()) {
                     out.printf("x-%d\ty-%d\n", row.index(), element.index());
                 }
             }
@@ -77,7 +80,26 @@ public class AnalyzeTest {
         Assert.assertTrue(rowSums(x).aggregate(Functions.MAX, Functions.IDENTITY) < 30);
 
         Assert.assertTrue(columnSums(x).aggregate(Functions.MAX, Functions.IDENTITY) < 65);
+    }
 
+    @Test
+    public void testScale() throws IOException {
+        for (int scale : new int[]{5, 6, 7}) {
+            scaleRun(scale);
+        }
+    }
+
+    /**
+     * Runs a cooccurrence test at the specified scale which is the power of ten of the number of occurrence records
+     * to test with.
+     *
+     * @param scale
+     */
+    Logger log = LoggerFactory.getLogger(AnalyzeTest.class);
+
+    public void scaleRun(int scale) throws IOException {
+        File inFile = new File(String.format("data-%d.tsv", scale));
+        Analyze m = new Analyze(com.google.common.io.Files.newReaderSupplier(inFile, Charsets.UTF_8), 500.0, 500.0, 200);
     }
 
     private Vector rowSums(Matrix x) {

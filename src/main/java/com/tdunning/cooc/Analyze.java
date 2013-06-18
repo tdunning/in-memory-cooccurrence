@@ -3,22 +3,20 @@ package com.tdunning.cooc;
 import com.google.common.base.Charsets;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
-import com.google.common.collect.HashMultiset;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Multiset;
-import com.google.common.collect.Ordering;
+import com.google.common.collect.*;
 import com.google.common.io.CharStreams;
 import com.google.common.io.Files;
 import com.google.common.io.InputSupplier;
 import com.google.common.io.LineProcessor;
 import org.apache.mahout.common.RandomUtils;
 import org.apache.mahout.math.*;
+import org.apache.mahout.math.function.Functions;
 import org.apache.mahout.math.stats.LogLikelihood;
 import org.apache.mahout.vectorizer.encoders.Dictionary;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
@@ -45,6 +43,8 @@ import java.util.Random;
 public class Analyze {
     private static final int ROW_LIMIT_SIZE = 200;
     public static final Splitter onTab = Splitter.on("\t");
+    private Logger log = LoggerFactory.getLogger(Analyze.class);
+
     private Dictionary rowDict;
     private Dictionary colDict;
     private Matrix filteredMatrix;
@@ -57,14 +57,12 @@ public class Analyze {
      */
     public static void main(String[] args) throws IOException {
         Preconditions.checkArgument(args.length == 1, "Should have a file name as an argument");
-        Analyze analyzer = new Analyze(Files.newReaderSupplier(new File(args[0]), Charsets.UTF_8));
+        Analyze analyzer = new Analyze(Files.newReaderSupplier(new File(args[0]), Charsets.UTF_8), 1000.0, 1000.0, ROW_LIMIT_SIZE);
 
         Matrix m = analyzer.getFilteredCooccurrence();
         Dictionary colDict = analyzer.getColDict();
         for (MatrixSlice row : m) {
-            Iterator<Vector.Element> i = row.vector().iterateNonZero();
-            while (i.hasNext()) {
-                Vector.Element element = i.next();
+            for (Vector.Element element : row.vector().nonZeroes()) {
                 System.out.printf("%s\t%s\n", colDict.values().get(row.index()), colDict.values().get(element.index()));
             }
         }
@@ -83,33 +81,54 @@ public class Analyze {
      * row and column designators.  The row is the unit of text for textual cooccurrence or the user
      * for recommendations.  The output will be a matrix of significant cooccurrences.
      *
-     * @param input A tab-delimited input file with row and column descriptors
+     * @param input          A tab-delimited input file with row and column descriptors
+     * @param maxRowCount
+     * @param maxColumnCount
+     * @param rowLimitSize
      * @throws IOException
      */
-    public Analyze(InputSupplier<InputStreamReader> input) throws IOException {
+    public Analyze(InputSupplier<InputStreamReader> input, double maxRowCount, double maxColumnCount, int rowLimitSize) throws IOException {
         this();
 
-        // now we square the occurrence matrix to get cooccurrences
-        Matrix cooccurrence = square(readOccurrenceMatrix(input, 1000.0, 1000.0));
+        Matrix occurrences = readOccurrenceMatrix(input, maxRowCount, maxColumnCount);
+        File sortedData = java.nio.file.Files.createTempFile("raw", ".dat").toFile();
 
+        // Write the occurrence data out in row major order
+        LineCounter counter = new LineCounter(log, "Writing sorted data");
+        try (DataOutputStream out = new DataOutputStream(new FileOutputStream(sortedData))) {
+            out.writeInt(occurrences.rowSize());
+            out.writeInt(occurrences.columnSize());
+            for (MatrixSlice row : occurrences) {
+                counter.step();
+                out.writeInt(Iterables.size(row.nonZeroes()));
+                for (Vector.Element element : row.nonZeroes()) {
+                    out.writeInt(element.index());
+                }
+            }
+        }
+        log.info("Sorted data is {} MB", String.format("%.1f", sortedData.length() / 1e6));
+
+        // now we square the occurrence matrix to get cooccurrences
+        // by reading the data from the file, we don't have to keep both cooccurrence and original data in memory
+        Matrix cooccurrence = squareFile(sortedData);
+
+        log.info("Starting sums");
         // to determine anomalous cooccurrence, we need row and column sums
-        Vector rowSums = new DenseVector(rowDict.size());
-        Vector colSums = new DenseVector(colDict.size());
+        Vector rowSums = new DenseVector(cooccurrence.rowSize());
+        Vector colSums = new DenseVector(cooccurrence.columnSize());
         for (MatrixSlice row : cooccurrence) {
             rowSums.set(row.index(), row.vector().zSum());
+            colSums.assign(row, Functions.PLUS);
         }
-
-        for (int i = 0; i < colDict.size(); i++) {
-            colSums.set(i, cooccurrence.viewColumn(i).zSum());
-        }
+        log.info("Largest row sum = {}", rowSums.maxValue());
+        log.info("Largest column sum = {}", colSums.maxValue());
 
         // and the total
         double total = rowSums.zSum();
 
+        log.info("Scoring");
         for (MatrixSlice row : cooccurrence) {
-            Iterator<Vector.Element> elements = row.vector().iterateNonZero();
-            while (elements.hasNext()) {
-                Vector.Element element = elements.next();
+            for (Vector.Element element : row.vector().nonZeroes()) {
                 long k11 = (long) element.get();
                 long k12 = (long) (rowSums.get(row.index()) - k11);
                 long k21 = (long) (colSums.get(element.index()) - k11);
@@ -119,19 +138,23 @@ public class Analyze {
             }
         }
 
-        filteredMatrix = new SparseRowMatrix(rowDict.size(), colDict.size(), true);
+        log.info("Filtering");
+        filteredMatrix = new SparseRowMatrix(cooccurrence.rowSize(), cooccurrence.columnSize(), true);
         for (MatrixSlice row : cooccurrence) {
-            List<Vector.Element> elements = Lists.newArrayList(row.vector().iterateNonZero());
+            List<Vector.Element> elements = Lists.newArrayList(row.vector().nonZeroes());
             Collections.sort(elements, new Ordering<Vector.Element>() {
                 public int compare(Vector.Element o1, Vector.Element o2) {
                     return Double.compare(o1.get(), o2.get());
                 }
             }.reverse());
-            elements = elements.subList(0, Math.min(ROW_LIMIT_SIZE, elements.size()));
+            elements = elements.subList(0, Math.min(rowLimitSize, elements.size()));
             for (Vector.Element element : elements) {
-                filteredMatrix.set(row.index(), element.index(), 1);
+                if (element.get() > 0) {
+                    filteredMatrix.set(row.index(), element.index(), 1);
+                }
             }
         }
+        log.info("Done");
 
     }
 
@@ -139,10 +162,14 @@ public class Analyze {
         final Multiset<Integer> rowCounts = HashMultiset.create();
         final Multiset<Integer> colCounts = HashMultiset.create();
 
+        log.info("Starting first pass");
         // read the data and build dictionaries.  This tells us how large the occurrence matrix must be
         CharStreams.readLines(input, new LineProcessor<Object>() {
+            LineCounter counter = new LineCounter(log);
 
             public boolean processLine(String s) throws IOException {
+                counter.step();
+
                 Iterator<String> x = onTab.split(s).iterator();
                 String s1 = x.next();
                 String s2 = x.next();
@@ -155,30 +182,43 @@ public class Analyze {
                 return null;
             }
         });
+        log.info("Average non-zeros per row {}", (double) rowCounts.size() / rowCounts.elementSet().size());
 
 
         // now we can read the actual data.  Note that we downsample this data based on our first pass
+        log.info("Starting second pass");
         return CharStreams.readLines(input, new LineProcessor<Matrix>() {
             Random random = RandomUtils.getRandom();
             Matrix m = new SparseRowMatrix(rowDict.size(), colDict.size(), true);
+            LineCounter counter = new LineCounter(log);
+            public double minSampleRate = Double.MAX_VALUE;
+            final int[] stats = {0, 0};
 
             public boolean processLine(String s) throws IOException {
+                counter.step();
                 Iterator<String> x = onTab.split(s).iterator();
                 int row = rowDict.intern(x.next());
                 int col = colDict.intern(x.next());
 
                 double rowSampleRate = Math.min(maxRowCount, rowCounts.count(row)) / rowCounts.count(row);
                 double columnSampleRate = Math.min(maxColumnCount, colCounts.count(col)) / colCounts.count(col);
+                minSampleRate = Math.min(minSampleRate, Math.min(rowSampleRate, columnSampleRate));
+
                 // this down-samples at a rate of Math.min(rowRate, colRate).  The alternative would be
                 // to generate two random numbers so we could downsample at the rate of rowRate * colRate.
                 // Since one of those should almost always be == 1, this shouldn't much matter.
-                if (random.nextDouble() < Math.min(rowSampleRate, columnSampleRate)) {
+                if (random.nextDouble() <= Math.min(rowSampleRate, columnSampleRate)) {
                     m.set(row, col, 1);
+                    stats[0]++;
                 }
+                stats[1]++;
                 return true;
             }
 
             public Matrix getResult() {
+                log.info("Done with second pass");
+                log.info("Retained {} / {} elements", stats[0], stats[1]);
+                log.info("Minimum sample factor {}", minSampleRate);
                 return m;
             }
         });
@@ -186,21 +226,21 @@ public class Analyze {
 
     /**
      * Given a matrix A, return A' * A which can be interpreted as a cooccurrence matrix.
-     *
+     * <p/>
      * Exposed for testing only.
      *
      * @param occurrences The original occurrence data
      * @return The cooccurrence data.
      */
     Matrix square(Matrix occurrences) {
+        LineCounter counter = new LineCounter(log);
+
+        log.info("Starting cooccurrence counting");
         Matrix r = new SparseRowMatrix(occurrences.columnSize(), occurrences.columnSize());
         for (MatrixSlice row : occurrences) {
-            Iterator<Vector.Element> i = row.vector().iterateNonZero();
-            Iterator<Vector.Element> j = row.vector().iterateNonZero();
-            while (i.hasNext()) {
-                Vector.Element e1 = i.next();
-                while (j.hasNext()) {
-                    Vector.Element e2 = j.next();
+            counter.step();
+            for (Vector.Element e1 : row.nonZeroes()) {
+                for (Vector.Element e2 : row.nonZeroes()) {
                     if (e1.index() != e2.index()) {
                         r.set(e1.index(), e2.index(), r.get(e1.index(), e2.index()) + e1.get() * e2.get());
                         r.set(e2.index(), e1.index(), r.get(e1.index(), e2.index()));
@@ -209,6 +249,43 @@ public class Analyze {
             }
         }
         return r;
+    }
+
+    /**
+     * Given a binary matrix A sorted in a file as raw integers, compute all cooccurrences in memory.
+     *
+     * @param occurrences The file containing the original occurrence data
+     * @return The cooccurrence data.
+     */
+    Matrix squareFile(File occurrences) throws IOException {
+        LineCounter counter = new LineCounter(log, "Cooc");
+
+        log.info("Starting cooccurrence counting");
+
+        try (DataInputStream in = new DataInputStream(new FileInputStream(occurrences))) {
+            int rowCount = in.readInt();
+            int columnCount = in.readInt();
+            Matrix r = new SparseRowMatrix(columnCount, columnCount);
+            for (int row = 0; row < rowCount; row++) {
+                counter.step();
+                int nonZeroCount = in.readInt();
+                int[] columns = new int[nonZeroCount];
+
+                for (int j = 0; j < nonZeroCount; j++) {
+                    columns[j] = in.readInt();
+                }
+
+                for (int n : columns) {
+                    for (int m: columns) {
+                        if (n != m) {
+                            double newValue = r.get(n, m) + 1;
+                            r.set(n, m, newValue);
+                        }
+                    }
+                }
+            }
+            return r;
+        }
     }
 
     public Matrix getFilteredCooccurrence() {
