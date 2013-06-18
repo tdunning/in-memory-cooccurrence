@@ -8,6 +8,8 @@ import com.google.common.io.CharStreams;
 import com.google.common.io.Files;
 import com.google.common.io.InputSupplier;
 import com.google.common.io.LineProcessor;
+
+
 import org.apache.mahout.common.RandomUtils;
 import org.apache.mahout.math.*;
 import org.apache.mahout.math.function.Functions;
@@ -17,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
@@ -41,14 +44,15 @@ import java.util.Random;
  * cooccurrence matrix while down-sampling the data.
  */
 public class Analyze {
-    private static final int ROW_LIMIT_SIZE = 200;
+    private static int ROW_LIMIT_SIZE = 200;
     public static final Splitter onTab = Splitter.on("\t");
     private Logger log = LoggerFactory.getLogger(Analyze.class);
 
     private Dictionary rowDict;
     private Dictionary colDict;
     private Matrix filteredMatrix;
-
+    private Multimap<Integer, Integer> referenceSentences;
+    
     /**
      * This is for illustration purposes only at this time.
      *
@@ -56,19 +60,34 @@ public class Analyze {
      * @throws IOException
      */
     public static void main(String[] args) throws IOException {
-        Preconditions.checkArgument(args.length == 1, "Should have a file name as an argument");
+        Preconditions.checkArgument(args.length >= 1, "Should have a file name as an argument");
         Analyze analyzer = new Analyze(Files.newReaderSupplier(new File(args[0]), Charsets.UTF_8), 1000.0, 1000.0, ROW_LIMIT_SIZE);
 
+        if(args.length==2){
+        	ROW_LIMIT_SIZE = Integer.parseInt(args[1]);
+        }
+        
         Matrix m = analyzer.getFilteredCooccurrence();
         Dictionary colDict = analyzer.getColDict();
+        Dictionary rowDict = analyzer.getRowDict();
+        Multimap<Integer, Integer> rSentences = analyzer.getReferenceSentences();
+        
+        int d = m.columnSize();
         for (MatrixSlice row : m) {
-            for (Vector.Element element : row.vector().nonZeroes()) {
-                System.out.printf("%s\t%s\n", colDict.values().get(row.index()), colDict.values().get(element.index()));
+        	 for (Vector.Element element : row.vector().nonZeroes()) {
+        		int z = row.index()*d + element.index();
+                Collection<Integer> concept = rSentences.get(z);
+                Iterator<Integer> it = concept.iterator();
+                System.out.printf("%s\t%s\t%s", colDict.values().get(row.index()), colDict.values().get(element.index()), concept.size());
+                while(it.hasNext()){
+                	System.out.printf("\t%s",rowDict.values().get(it.next()));
+                }
+                System.out.printf("\n");
             }
         }
     }
 
-    /**
+	/**
      * Package local constructor for testing only.
      */
     Analyze() {
@@ -261,7 +280,8 @@ public class Analyze {
         LineCounter counter = new LineCounter(log, "Cooc");
 
         log.info("Starting cooccurrence counting");
-
+        referenceSentences = ArrayListMultimap.create();
+        
         try (DataInputStream in = new DataInputStream(new FileInputStream(occurrences))) {
             int rowCount = in.readInt();
             int columnCount = in.readInt();
@@ -280,6 +300,10 @@ public class Analyze {
                         if (n != m) {
                             double newValue = r.get(n, m) + 1;
                             r.set(n, m, newValue);
+                            
+                         	//Adriano: Store Reference
+                            int z = n*columnCount + m;
+                            referenceSentences.put(z, row);
                         }
                     }
                 }
@@ -299,4 +323,8 @@ public class Analyze {
     public Dictionary getColDict() {
         return colDict;
     }
+
+	public Multimap<Integer, Integer> getReferenceSentences() {
+		return referenceSentences;
+	}
 }
